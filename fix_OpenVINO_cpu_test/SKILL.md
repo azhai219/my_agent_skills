@@ -1,7 +1,7 @@
 ---
 name: fix-cpu-test-in-openvino
-description: Debug and fix OpenVINO issues on Linux with a repeatable workflow: minimal repro, verbose runtime logs, IR dumps, debugger traces, root-cause fix, rebuild, and verification.
-compatibility: Requires Linux shell access and a local OpenVINO source + build with debug symbols.
+description: "Debug and fix OpenVINO issues on Linux with a repeatable workflow: minimal repro, verbose runtime logs, IR dumps, debugger traces, root-cause fix, rebuild, and verification."
+compatibility: "Requires Linux shell access and a local OpenVINO source + build with debug symbols."
 ---
 
 # Debug and Fix OpenVINO (Linux)

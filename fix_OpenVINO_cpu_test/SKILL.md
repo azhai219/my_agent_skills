@@ -5,7 +5,6 @@ compatibility: Requires Linux shell access and a local OpenVINO source + build w
 ---
 
 # Debug and Fix OpenVINO (Linux)
-
 Use this skill when OpenVINO crashes, hangs, miscompiles, or produces incorrect outputs.
 
 ## Goal

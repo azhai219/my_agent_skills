@@ -1,7 +1,7 @@
 ---
 name: fetch-static-model
 description: Download OpenVINO static models from an online model zoo URL (remote disk HTTP directory listing) using a model table (name/framework/precision) and store artifacts under a local directory.
-compatibility: Linux shell (bash), network access to the model zoo host, and either `wget` (preferred) or `curl`.
+compatibility: Linux shell (bash), network access to the model zoo host, `wget`, and `python3`.
 ---
 
 # Fetch Static Models (from online model zoo)
@@ -44,140 +44,87 @@ Precision parsing rules:
   - `/mnt/xiuchuan/models/debug`
 - The skill stores files **under this directory**.
 
+## Tooling
+
+This skill is implemented by a generic script:
+
+- `.github/fetch_static_model/scripts/fetch_static_models.sh`
+
+Agents should prefer calling this script rather than re-implementing wget logic inline.
+
 ## Expected remote layout (URL template)
 
-This skill assumes the model zoo uses a URL hierarchy like:
+Many zoos use an extra framework “variant” folder under `${MODEL}/${FRAMEWORK}/` (e.g. `pytorch/` under `.../pytorch/`, or `tf_frozen/` under `.../tf/`).
 
-- FP16 OpenVINO IR:
-  - `${BASE_URL}/${MODEL}/${FRAMEWORK}/${FRAMEWORK}/FP16/1/ov/`
+This skill’s script auto-detects `${FW_VARIANT}` by reading the directory listing at:
 
-- INT8 (quantized) OpenVINO IR (as in the provided example):
-  - `${BASE_URL}/${MODEL}/${FRAMEWORK}/${FRAMEWORK}/FP16/INT8/1/ov/optimized/`
+- `${BASE_URL}/${MODEL}/${FRAMEWORK}/`
 
-Where:
-- `${BASE_URL}` is the input model zoo URL.
-- `${MODEL}` is the model name (e.g., `roberta-base`).
-- `${FRAMEWORK}` is the normalized framework folder name (e.g., `pytorch`).
+Then it downloads:
 
-If your zoo uses a different INT8 layout, adjust the INT8 template accordingly.
+- FP16/FP32 OpenVINO IR:
+  - `${BASE_URL}/${MODEL}/${FRAMEWORK}/${FW_VARIANT}/${PRECISION}/1/ov/`
 
-## Download procedure (wget-based)
+- INT8 OpenVINO IR (common layout):
+  - `${BASE_URL}/${MODEL}/${FRAMEWORK}/${FW_VARIANT}/FP16/INT8/1/ov/`
+
+Notes:
+- Some zoos store INT8 IR under `ov/optimized/` (the script downloads the whole `ov/` tree so it still works).
+- If a specific model/precision path does not exist (404), the script logs a warning and continues.
+
+## Download procedure
 
 ### 0) Preconditions
 
 ```bash
 command -v wget
+command -v python3
 mkdir -p "${LOCAL_DIR}"
 ```
 
 Optional (only if your internal TLS uses an untrusted cert): add `--no-check-certificate` to `wget`.
 
-### 1) Decide output structure
+### 1) Output structure
 
-To avoid filename collisions across models/precisions, this skill downloads into subfolders:
+The tool preserves the remote directory structure under `${LOCAL_DIR}`, starting at `${MODEL}/...`.
 
-- `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/FP16/...`
-- `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/INT8/...`
+Example (you will typically see the framework repeated because `${FW_VARIANT}` is often equal to `${FRAMEWORK}`):
 
-If you truly need everything flattened into `${LOCAL_DIR}`, use `wget -nd` (not recommended).
+- `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/${FW_VARIANT}/FP16/1/ov/...`
+- `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/${FW_VARIANT}/FP16/INT8/1/ov/...`
 
-### 2) Compute `--cut-dirs` so files land under `${LOCAL_DIR}` cleanly
-
-With `--no-host-directories`, `wget` would otherwise create path segments from the URL.
-We cut away the base path segments so downloaded folders start at `${MODEL}/...`.
-
-```bash
-# BASE_URL like: https://host/a/b/c/
-# BASE_PATH segments = a/b/c  -> CUT_DIRS=3
-BASE_URL="${BASE_URL%/}/"
-# Portable segment count (works for typical URLs):
-CUT_DIRS=$(python3 - << 'PY'
-import os, sys
-base_url = os.environ['BASE_URL']
-# Extract path after host
-path = base_url.split('://', 1)[1]
-path = path.split('/', 1)[1] if '/' in path else ''
-path = path.strip('/')
-print(0 if not path else len([p for p in path.split('/') if p]))
-PY
-)
-
-echo "BASE_URL=$BASE_URL"
-echo "CUT_DIRS=$CUT_DIRS"
-```
-
-If `CUT_DIRS` is wrong for your environment, set it manually.
-
-### 3) Download one precision (helper)
-
-```bash
-fetch_tree() {
-  local url="$1"
-  local out_dir="$2"
-
-  mkdir -p "$out_dir"
-
-  wget -r -np -N \
-    --no-host-directories \
-    --cut-dirs="$CUT_DIRS" \
-    --reject "index.html*" \
-    -P "$out_dir" \
-    "$url"
-}
-```
-
-### 4) For each row in the model table: build URLs and download
+### 2) Run the tool
 
 For each model:
 - Build the FP16 URL and download into `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/FP16/`
 - If INT8 requested, build INT8 URL and download into `${LOCAL_DIR}/${MODEL}/${FRAMEWORK}/INT8/`
 
-**Example (matches the request):**
-
-Inputs:
-- Base URL:
-  - `https://ov-share-04.iotg.sclab.intel.com/cv_bench_cache/WW09_static_2026.1.0-21155/`
-- Table row:
-  - model name: `roberta-base`
-  - framework: `pytorch` (aka `PT`)
-  - precision: `FP16/INT8`
-- Local dir:
-  - `/mnt/xiuchuan/models/debug`
-
-Execution:
+**Example:**
 
 ```bash
 BASE_URL="https://ov-share-04.iotg.sclab.intel.com/cv_bench_cache/WW09_static_2026.1.0-21155/"
 LOCAL_DIR="/mnt/xiuchuan/models/debug"
-MODEL="roberta-base"
-FRAMEWORK="pytorch"
 
-# FP16
-FP16_URL="${BASE_URL%/}/$MODEL/$FRAMEWORK/$FRAMEWORK/FP16/1/ov/"
-fetch_tree "$FP16_URL" "$LOCAL_DIR"
-
-# INT8 (example layout)
-INT8_URL="${BASE_URL%/}/$MODEL/$FRAMEWORK/$FRAMEWORK/FP16/INT8/1/ov/optimized/"
-fetch_tree "$INT8_URL" "$LOCAL_DIR"
+.github/fetch_static_model/scripts/fetch_static_models.sh \
+  --base-url "$BASE_URL" \
+  --local-dir "$LOCAL_DIR" \
+  --table - <<'EOF'
+| model name | framework | precision |
+|---|---|---|
+| roberta-base | PT | FP16/INT8 |
+EOF
 ```
 
-This downloads:
-- all FP16 files from:
-  - `${BASE_URL%/}/roberta-base/pytorch/pytorch/FP16/1/ov/`
-- all INT8 files from:
-  - `${BASE_URL%/}/roberta-base/pytorch/pytorch/FP16/INT8/1/ov/optimized/`
-
-And stores them under:
-- `/mnt/xiuchuan/models/debug/roberta-base/pytorch/...` (subfolders preserved)
+Agent notes:
+- Prefer passing the model table via `--table -` (stdin heredoc) to avoid creating temporary files.
+- If your environment has custom TLS, consider `--no-check-certificate` (internal only).
 
 ## Validation checklist
 
 After downloading:
 
 ```bash
-ls -R "${LOCAL_DIR}/${MODEL}/${FRAMEWORK}" | head
-# Optional: find IR pairs
-find "${LOCAL_DIR}/${MODEL}/${FRAMEWORK}" -maxdepth 10 -type f \( -name '*.xml' -o -name '*.bin' \) | head
+find "${LOCAL_DIR}" -type f \( -name '*.xml' -o -name '*.bin' \) | head
 ```
 
 ## Common issues

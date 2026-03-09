@@ -250,41 +250,31 @@ discover_fw_variant() {
     return
   fi
 
-  python3 - "$fw" <<'PY' <<<"$html"
-import re, sys
-fw = sys.argv[1].strip()
-html = sys.stdin.read()
-# capture first-level directory hrefs
-hrefs = re.findall(r'href="([^"]+/)"', html)
-clean=[]
+  python3 -c "import re,sys
+fw=sys.argv[1].strip()
+html=sys.stdin.read()
+hrefs=re.findall(r'href=\"([^\"]+/)\"', html)
+dirs=[]
+seen=set()
 for h in hrefs:
-    if h in ('../','./'):
-        continue
-    # keep only first-level dirs
-    if '/' in h.strip('/').strip('/'):
-        continue
-    clean.append(h.strip('/'))
-# unique preserve order
-seen=set(); dirs=[]
-for d in clean:
-    if d not in seen:
-        seen.add(d)
-        dirs.append(d)
+  if h in ('../','./'): continue
+  d=h.strip('/')
+  if '/' in d: continue
+  if d in seen: continue
+  seen.add(d)
+  dirs.append(d)
 if not dirs:
-    print(fw)
-    raise SystemExit
-# prefer exact match
+  print(fw)
+  raise SystemExit
 for d in dirs:
-    if d == fw:
-        print(d)
-        raise SystemExit
-# else if only one, pick it
+  if d == fw:
+    print(d)
+    raise SystemExit
 if len(dirs) == 1:
-    print(dirs[0])
+  print(dirs[0])
 else:
-    # best-effort: pick first
-    print(dirs[0])
-PY
+  print(dirs[0])
+" "$fw" <<<"$html"
 }
 
 build_url() {

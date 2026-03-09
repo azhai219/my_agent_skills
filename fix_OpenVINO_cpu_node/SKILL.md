@@ -285,6 +285,17 @@ Add a reusable helper near the primitive execution site:
 3. **Audit all call sites** — if `execute()` is called in multiple places, protect all of them.
 4. **Document why** — add a comment explaining the guard.
 
+### 3.3) Add guard or assertion at OpenVINO side.
+
+In order to avoid the crash, we can add guard or assertion at OpenVINO side. For example, if the crash is caused by empty tensor, we can add a guard like:
+
+```cpp
+if (input_tensor.empty()) {
+      // Log a warning if needed
+      return; // No-op for empty tensor
+}
+```
+
 ---
 
 ## Phase 4: Validate Fix

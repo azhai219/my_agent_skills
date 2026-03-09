@@ -1,5 +1,5 @@
 ---
-name: fix-ov-cpu-crash
+name: fix_OpenVINO_cpu_node
 description: Systematic playbook to diagnose, root-cause, fix, and validate OpenVINO CPU runtime crashes — covers error type identification, node isolation, oneDNN vs integration classification, and regression test creation.
 ---
 
@@ -57,6 +57,7 @@ description: Systematic playbook to diagnose, root-cause, fix, and validate Open
 
 ```bash
 export OV_ROOT=/path/to/openvino
+export WORKSPACE=/path/to/openvino/../
 export OV_BUILD=$OV_ROOT/build
 export OV_BIN_DEBUG=$OV_ROOT/bin/intel64/Debug
 export MODEL_XML=/path/to/model.xml
@@ -69,6 +70,9 @@ export ONEDNN_ROOT=$OV_ROOT/src/plugins/intel_cpu/thirdparty/onednn
 ## 1) Build OpenVINO (Debug, CPU-Focused)
 
 ```bash
+cd "$WORKSPACE"
+source venv/dev/bin/activate
+source set_debug.sh
 cd "$OV_BUILD"
 cmake .. \
   -DCMAKE_BUILD_TYPE=Debug \
@@ -97,7 +101,7 @@ cmake .. \
   -DENABLE_CPPLINT_REPORT=OFF \
   -DCMAKE_INSTALL_PREFIX="$PWD/install" \
   -DENABLE_SYSTEM_TBB=OFF
-cmake --build . -- -j"$(nproc --all)"
+make -j"$(nproc --all)"
 ```
 
 ---
@@ -107,11 +111,7 @@ cmake --build . -- -j"$(nproc --all)"
 ### 1.1) Reproduce Crash
 
 ```bash
-"$OV_BIN_DEBUG/benchmark_app" \
-  -m "$MODEL_XML" \
-  -t 2 \
-  -data_shape "[1,2]" \
-  -d CPU
+"$OV_BIN_DEBUG/benchmark_app" -m "$MODEL_XML" -t 2 -data_shape "[1,2]" -d CPU
 ```
 
 ### 1.2) Capture Error Signature
@@ -126,9 +126,7 @@ cmake --build . -- -j"$(nproc --all)"
 ### 1.3) Collect Stack Trace (Optional but Recommended)
 
 ```bash
-gdb -batch -ex "run" -ex "bt full" --args \
-  "$OV_BIN_DEBUG/benchmark_app" -m "$MODEL_XML" -t 1 -d CPU \
-  2>&1 | tee crash_bt.log
+gdb -batch -ex "run" -ex "bt full" --args "$OV_BIN_DEBUG/benchmark_app" -m "$MODEL_XML" -t 1 -d CPU 2>&1 | tee crash_bt.log
 ```
 
 Or enable core dumps:
@@ -166,10 +164,10 @@ tail -50 dnn_verbose.log | grep -E "^onednn_verbose"
 Example output:
 
 ```
-onednn_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:abcd:f0 dst_f32::blocked:abcd:f0,,,1x0x1x1,0.00195312
+onednn_verbose,exec,cpu,....
 ```
 
-Note the **primitive type** (`reorder`), **implementation** (`jit:uni`), and **shape** (`1x0x1x1` — zero dim!).
+For example: Note the **primitive type**, **implementation**, and **shape**.
 
 ### 2.3) Dump CPU Graph (Optional)
 
@@ -194,7 +192,6 @@ Inspect `exec_graph.xml` to find the faulting node's exact name and type.
    - NO, benchdnn passes → **Integration bug** (Phase 3.2)
 
 3. **Common integration patterns that produce invalid oneDNN calls:**
-   - Zero-dim tensors passed to primitives
    - Mismatched memory descriptors
    - Null pointers / uninitialized memory
    - Missing guards before `primitive.execute()`
@@ -208,7 +205,7 @@ Inspect `exec_graph.xml` to find the faulting node's exact name and type.
 From `dnn_verbose.log`, find the crashing primitive:
 
 ```
-onednn_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:abcd:f0 dst_f32::blocked:abcd:f0,,,1x0x1x1,0.00195312
+onednn_verbose,exec,cpu,...
 ```
 
 ### 3.1.2) Build benchdnn
@@ -234,13 +231,13 @@ This parses verbose lines and generates ready-to-run benchdnn commands.
 **Example input (from verbose log):**
 
 ```
-onednn_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:abcd:f0 dst_f32::blocked:abcd:f0,,,1x0x1x1,0.00195312
+onednn_verbose,exec,cpu,....
 ```
 
 **Example output (benchdnn command):**
 
 ```bash
-./benchdnn --reorder --sdt=f32 --ddt=f32 --stag=abcd --dtag=abcd 1x0x1x1
+./benchdnn ...
 ```
 
 For manual construction (if script unavailable), the pattern is:
@@ -253,7 +250,7 @@ For manual construction (if script unavailable), the pattern is:
 
 ```bash
 cd "$OV_BUILD/_deps/onednn-build"
-./tests/benchdnn/benchdnn --reorder --sdt=f32 --ddt=f32 --stag=abcd --dtag=abcd 1x0x1x1
+./tests/benchdnn/benchdnn 0
 ```
 
 - **Crashes** → file issue in [oneDNN GitHub](https://github.com/oneapi-src/oneDNN/issues) with verbose + benchdnn command + platform info.
@@ -263,15 +260,6 @@ cd "$OV_BUILD/_deps/onednn-build"
 
 If oneDNN fix is not immediate, add a guard in OpenVINO integration to skip the problematic primitive call:
 
-```cpp
-// Example: skip reorder on zero-dim
-if (hasZeroDims(src_desc) || hasZeroDims(dst_desc)) {
-    return;  // no-op for empty tensor
-}
-reorder_prim.execute(strm, ...);
-```
-
----
 
 ## Phase 3.2: Integration Bug — General Fix Pattern
 
@@ -279,7 +267,6 @@ reorder_prim.execute(strm, ...);
 
 | Root Cause                            | Fix Pattern                                           |
 |---------------------------------------|-------------------------------------------------------|
-| Zero-dim tensor passed to primitive   | Guard: `if (hasZeroDims(desc)) return;`               |
 | Null memory pointer                   | Guard: `if (!mem.get_data_handle()) return;`          |
 | Mismatched src/dst descriptors        | Validate descriptors before `getReorderPrim()`        |
 | Missing dynamic shape propagation     | Ensure `prepareParams()` updates shapes correctly     |
@@ -289,30 +276,13 @@ reorder_prim.execute(strm, ...);
 
 Add a reusable helper near the primitive execution site:
 
-```cpp
-static bool hasEmptyDims(const dnnl::memory& mem) {
-    const auto& dims = mem.get_desc().get_dims();
-    return std::any_of(dims.begin(), dims.end(), [](dnnl::memory::dim d) { return d == 0; });
-}
-```
-
 ### 3.2.3) Apply Guard Before Primitive Execution
-
-```cpp
-void SomeHelper::execute(dnnl::stream& strm, ...) {
-    // Skip execution for empty tensors — no data to process
-    if (hasEmptyDims(srcMem) || hasEmptyDims(dstMem)) {
-        return;
-    }
-    reorder.execute(strm, {{DNNL_ARG_FROM, srcMem}, {DNNL_ARG_TO, dstMem}});
-}
-```
 
 ### 3.2.4) Patch Principles
 
 1. **Minimal change** — guard closest to the crash trigger.
 2. **Preserve semantics** — empty tensor = no-op is correct behavior.
-3. **Audit all call sites** — if `reorder.execute()` is called in multiple places, protect all of them.
+3. **Audit all call sites** — if `execute()` is called in multiple places, protect all of them.
 4. **Document why** — add a comment explaining the guard.
 
 ---
@@ -338,7 +308,7 @@ cmake --build . --target benchmark_app ov_cpu_func_tests -j"$(nproc --all)"
 
 ```bash
 cd "$OV_BIN_DEBUG"
-./ov_cpu_func_tests --gtest_filter='*TensorIterator*:*Loop*'
+./ov_cpu_func_tests --gtest_filter='*...*'
 ```
 
 **Expected:** All tests pass.
@@ -357,68 +327,30 @@ grep -r "YourNodeType" "$OV_ROOT/src/plugins/intel_cpu/tests/functional/"
 
 ### 5.2) Test Design Guidelines
 
-| Scenario                         | Test Approach                                              |
-|----------------------------------|------------------------------------------------------------|
-| Zero-dim back-edge in Loop       | Create Loop with Slice(0,0) producing empty merged input   |
-| Zero-dim sliced input            | Use Slice op to produce 0-size tensor before target node   |
-| Dynamic shape edge case          | Use `InputShape{PartialShape::dynamic(), {static_shapes}}` |
-| Platform-specific (ISA-dependent)| Use `CheckPluginRelatedResults` to verify on current CPU   |
+- Keep the test minimal: one model/function that deterministically enters the failing path.
+- Prefer zero-dim or empty-shape edge input if the crash involved empty tensors.
+- Assert no crash and correct status/output shape.
+- Keep hardware-independent checks (avoid ISA-specific assumptions).
 
-### 5.3) Example: Loop Zero-Dim Back-Edge Test
+### 5.3) Add new Test
 
-```cpp
-class LoopZeroDimBackEdgeCPUTest : public SubgraphBaseTest {
-protected:
-    void SetUp() override {
-        targetDevice = ov::test::utils::DEVICE_CPU;
+Typical location:
 
-        // Trip count = 2
-        auto trip_count = std::make_shared<ov::op::v0::Constant>(
-            ov::element::i64, ov::Shape{}, std::vector<int64_t>{2});
-        auto exec_cond = std::make_shared<ov::op::v0::Constant>(
-            ov::element::boolean, ov::Shape{}, std::vector<bool>{true});
+- `src/plugins/intel_cpu/tests/functional/shared_tests_instances/`
+- or node-specific suite under `src/plugins/intel_cpu/tests/functional/custom/`
 
-        // External input: [2, 4]
-        auto X = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape{2, 4});
-        init_input_shapes({{{2, 4}, {{2, 4}}}});
+Pattern:
 
-        // Build Loop body
-        auto body_input = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::PartialShape::dynamic(2));
-        auto body_cond_out = std::make_shared<ov::op::v0::Constant>(
-            ov::element::boolean, ov::Shape{}, std::vector<bool>{true});
-        
-        // Slice to empty: begin=0, end=0, step=1 on axis 0 → produces [0, 4]
-        auto begin = ov::op::v0::Constant::create(ov::element::i64, {1}, {0});
-        auto end   = ov::op::v0::Constant::create(ov::element::i64, {1}, {0});
-        auto step  = ov::op::v0::Constant::create(ov::element::i64, {1}, {1});
-        auto axes  = ov::op::v0::Constant::create(ov::element::i64, {1}, {0});
-        auto slice_out = std::make_shared<ov::op::v8::Slice>(body_input, begin, end, step, axes);
-
-        auto body = std::make_shared<ov::Model>(
-            ov::OutputVector{body_cond_out, slice_out},
-            ov::ParameterVector{body_input});
-
-        auto loop = std::make_shared<ov::op::v5::Loop>(trip_count, exec_cond);
-        loop->set_special_body_ports({-1, 0});
-        loop->set_function(body);
-        loop->set_merged_input(body_input, X, slice_out);  // back-edge with zero-dim output
-        loop->get_concatenated_slices(slice_out, 0, 1, 1, -1, 0);  // scan output
-
-        auto result = std::make_shared<ov::op::v0::Result>(loop->output(0));
-        function = std::make_shared<ov::Model>(ov::ResultVector{result}, ov::ParameterVector{X});
-    }
-};
-
-TEST_F(LoopZeroDimBackEdgeCPUTest, smoke_ZeroDimBackEdgeNoCrash) {
-    run();
-}
-```
+1. Build a tiny graph that triggers the target node.
+2. Set input shapes/data to the edge case.
+3. Compile for `CPU` and run inference.
+4. Verify output tensor shape/content (or expected no-op behavior).
 
 ### 5.4) Run the New Test
 
 ```bash
 cd "$OV_BIN_DEBUG"
-./ov_cpu_func_tests --gtest_filter='*ZeroDimBackEdge*'
+./ov_cpu_func_tests --gtest_filter='*...*'
 ```
 
 **Expected:** `[PASSED] 1 test`
@@ -459,62 +391,24 @@ cd "$OV_BIN_DEBUG"
 - **Platform:** Intel Core i7-12700 / AVX2
 
 ## Root Cause
-- **Failing Node:** `TensorIterator_123` (type: Loop)
-- **Code Path:** `BackEdgePortHelper::execute` → `reorder.execute()`
-- **Issue:** Zero-dim memory descriptor passed to oneDNN reorder primitive
+- **Failing Node:** `...` (type: ...)
+- **Code Path:** `...::execute` → `....execute()`
+- **Issue:** ...
 
 ## Ownership
 - [x] OpenVINO Integration bug
 - [ ] oneDNN bug
 
 ## Fix
-Skip reorder execution when source or destination memory has any dimension == 0.
 
 ## Validation
 - [x] Model runs without crash
-- [x] `ov_cpu_func_tests --gtest_filter='*Loop*'` passes
-- [x] Regression test added: `LoopZeroDimBackEdgeCPUTest.smoke_ZeroDimBackEdgeNoCrash`
+- [x] `ov_cpu_func_tests --gtest_filter='*...*'` passes
+- [x] Regression test added: `...`
 ```
-
----
-
-## Case Study: TensorIterator Zero-Dim Back-Edge Reorder
-
-**Symptom:** `SIGFPE` in benchmark_app on Intel Core CPU (AVX2 path).
-
-**Investigation:**
-1. Enabled `OV_CPU_VERBOSE=1` and `ONEDNN_VERBOSE=all`.
-2. Last verbose line before crash showed `reorder` with shape `1x0x1x1`.
-3. Stack trace pointed to `BackEdgePortHelper::execute` in `tensoriterator.cpp`.
-
-**Classification:**
-- benchdnn with `--reorder 1x0x1x1` passed on Xeon (AVX-512) but crashed on Core (AVX2).
-- Different JIT code paths → but root cause is invalid input, not JIT bug.
-- **Verdict:** Integration bug — OpenVINO should not call reorder on zero-dim.
-
-**Fix:**
-```cpp
-static bool hasEmptyDims(const dnnl::memory& mem) {
-    const auto& dims = mem.get_desc().get_dims();
-    return std::any_of(dims.begin(), dims.end(), [](dnnl::memory::dim d) { return d == 0; });
-}
-
-void BackEdgePortHelper::execute(dnnl::stream& strm, ...) {
-    if (hasEmptyDims(from) || hasEmptyDims(to)) return;
-    reorder.execute(strm, ...);
-}
-```
-
-**Validation:**
-- Model passes: ✓
-- Functional tests pass: ✓
-- Regression test added: `LoopZeroDimBackEdgeCPUTest.smoke_ZeroDimBackEdgeNoCrash`
-
----
 
 ## Source References
 
 - CPU plugin source: `$OV_ROOT/src/plugins/intel_cpu/src`
-- TensorIterator/Loop: `nodes/tensoriterator.cpp`
 - Functional tests: `$OV_ROOT/src/plugins/intel_cpu/tests/functional/`
 - oneDNN benchdnn: `$OV_BUILD/_deps/onednn-build/tests/benchdnn/`

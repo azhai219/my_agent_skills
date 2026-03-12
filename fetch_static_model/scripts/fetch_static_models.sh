@@ -34,7 +34,7 @@ Model table formats:
      | roberta-base | PT | FP16/INT8 |
 
 Framework normalization:
-  PT->pytorch, ONNX->onnx, TF->tf
+  PT->pytorch, ONNX->onnx, TF->tf, TF2->tf2, PADDLE->paddle
 
 Precision normalization:
   FP16, FP32, INT8
@@ -154,6 +154,11 @@ def norm_fw(s: str) -> str:
         'onnx': 'onnx',
         'tf': 'tf',
         'tensorflow': 'tf',
+      'tf2': 'tf2',
+      'tensorflow2': 'tf2',
+      'tensorflow-2': 'tf2',
+      'paddle': 'paddle',
+      'paddlepaddle': 'paddle',
     }
     return mapping.get(s, '')
 
@@ -194,6 +199,20 @@ def parse_colon_row(line: str):
         return None
     return parts[0], parts[1], ':'.join(parts[2:])
 
+def parse_tsv_or_ws_row(line: str):
+    # Accept either tab-separated or generic whitespace-separated 3-column rows:
+    # model framework precision
+    if '|' in line or ':' in line:
+        return None
+    parts = re.split(r'\t+|\s+', line.strip())
+    if len(parts) < 3:
+        return None
+    model, fw, prec = parts[0], parts[1], parts[2]
+    # Skip potential headers
+    if model.strip().lower() in {'model', 'name', 'model_name', 'model-name'}:
+        return None
+    return model.strip(), fw.strip(), prec.strip()
+
 rows = []
 for line in text:
     s = line.strip()
@@ -205,6 +224,8 @@ for line in text:
     trip = parse_markdown_row(s)
     if trip is None:
         trip = parse_colon_row(s)
+    if trip is None:
+        trip = parse_tsv_or_ws_row(s)
 
     if trip is None:
         continue

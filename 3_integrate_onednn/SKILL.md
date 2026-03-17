@@ -135,3 +135,6 @@ Finish criteria:
 - If local work exists before integration, stash or commit first.
 - Keep patches minimal and focused on OpenVINO adaptation points.
 - Prefer small verification steps during conflict resolution to reduce debug time.
+
+## References to previous integration PR
+- [PR #32935](https://github.com/openvinotoolkit/openvino/pull/32935) for oneDNN v3.10 integration example.

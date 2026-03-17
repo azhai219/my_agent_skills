@@ -36,13 +36,13 @@ Enter the OpenVINO repository and configure a build directory.
 ```bash
 cd <openvino_path>
 mkdir -p build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -S . -B build -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 ```
 
 If a smaller optimized build is preferred, `Release` is also acceptable:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 ```
 
 Then build OpenVINO:

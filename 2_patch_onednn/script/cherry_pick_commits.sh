@@ -38,7 +38,8 @@ BUILD_DIR=${3:-$REPO/build}
 
 [[ -d "$REPO" ]] || die "Repository path does not exist: $REPO"
 [[ -f "$COMMITS_FILE" ]] || die "Commit list file does not exist: $COMMITS_FILE"
-[[ -d "$BUILD_DIR" ]] || die "Build directory does not exist: $BUILD_DIR"
+
+mkdir -p "$BUILD_DIR"
 
 cd "$REPO"
 
@@ -75,8 +76,19 @@ build_repo() {
     head=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
     log_file="/tmp/build_${head}.log"
 
+    info "Cleaning build directory: $BUILD_DIR"
+    find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+    info "Configuring repository: $REPO -> $BUILD_DIR"
+    cmake -S "$REPO" -B "$BUILD_DIR" 2>&1 | tee "$log_file"
+    build_status=${PIPESTATUS[0]}
+
+    if [[ $build_status -ne 0 ]]; then
+        die "Configure failed. See $log_file"
+    fi
+
     info "Building repository: $BUILD_DIR"
-    cmake --build "$BUILD_DIR" --parallel "$(nproc)" 2>&1 | tee "$log_file"
+    cmake --build "$BUILD_DIR" --parallel "$(nproc)" 2>&1 | tee -a "$log_file"
     build_status=${PIPESTATUS[0]}
 
     if [[ $build_status -ne 0 ]]; then

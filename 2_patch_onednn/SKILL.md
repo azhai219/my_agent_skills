@@ -100,19 +100,22 @@ Open each conflicted file. Conflict markers look like:
 
 **Resolution principles (apply in order):**
 
-1. **Syntax first** — make the file compile cleanly:
-   - Remove all conflict markers.
-   - Choose the side whose syntax is correct for the surrounding code.
-   - Adapt variable names, types, or includes if the surrounding code changed since the original commit.
-
-2. **Logic correctness** — preserve the intent of the cherry-picked commit:
+1. **Logic correctness first** — preserve the intent of the cherry-picked commit:
    - Understand what the original commit was fixing or adding.
    - Ensure the logic of the incoming change still applies correctly on top of the current base.
    - Do not silently drop code from the incoming commit unless the surrounding code has already incorporated it.
 
+2. **Syntax correctness** — make the file compile cleanly:
+   - Remove all conflict markers.
+   - Choose the side whose syntax is correct for the surrounding code.
+   - Adapt variable names, types, or includes if the surrounding code changed since the original commit.
+   - Keep the code style consistent with the current codebase, even if it differs from the original commit's style.
+
 3. **Consistency** — keep the change self-consistent:
    - Check that related files (headers, source files, test files) are all updated together.
    - Look for any companion changes in the original commit that may also conflict.
+
+| note: when applying a conditional compilation patch, treat it carefully, understand the intent of the original change, and don't miss any related instances changed in the original commit. 
 
 Stage resolved files and continue:
 

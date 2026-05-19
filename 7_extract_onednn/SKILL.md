@@ -1,14 +1,14 @@
 ---
 name: 7_extract_onednn
-description: Extract a specific oneDNN commit into a standalone implementation under oneDNN_ext, keep function and performance equivalent to the original change, revert the original oneDNN commit, and validate the result by building OpenVINO and running tests.
+description: Extract a specific oneDNN commit into a standalone implementation under `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`, keep function and performance equivalent to the original change, revert the original oneDNN commit, and validate the result by building OpenVINO and running tests.
 compatibility: Linux shell, git, CMake, a buildable OpenVINO tree, a buildable oneDNN tree, and a writable oneDNN_ext directory.
 ---
 
 # Extract oneDNN Commit into oneDNN_ext
 
-Use this skill when you need to understand one specific oneDNN commit, move its effective implementation out of stock oneDNN into a standalone extension library under `oneDNN_ext`, keep the behavior and performance of the original change, revert the original commit from oneDNN, and verify the final solution through OpenVINO build and test validation.
+Use this skill when you need to understand one specific oneDNN commit, move its effective implementation out of stock oneDNN into a standalone extension library under `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`, keep the behavior and performance of the original change, revert the original commit from oneDNN, and verify the final solution through OpenVINO build and test validation.
 
-The target result is a standalone implementation placed under `oneDNN_ext` that can work with oneDNN basic data structures and act as an extension library on top of stock oneDNN.
+The target result is a standalone implementation placed under `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` that can work with oneDNN basic data structures and act as an extension library on top of stock oneDNN.
 
 ## Requirements
 
@@ -18,8 +18,8 @@ The extracted implementation must satisfy all of the following:
 2. Performance is the same as the original commit, or as close as measurement can verify.
 3. API is similar to the original oneDNN-facing API, but does not need to be byte-for-byte identical.
 4. C++, inline assembly, external assembly, JIT-generated code, and existing oneDNN low-level mechanisms may all be used if needed.
-5. The final implementation lives in `oneDNN_ext`, not inside stock oneDNN.
-6. `oneDNN_ext` may depend on oneDNN basic data structures and may extend them when necessary.
+5. The final implementation lives in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`, not inside stock oneDNN.
+6. `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` may depend on oneDNN basic data structures and may extend them when necessary.
 
 ## Inputs
 
@@ -33,13 +33,13 @@ The extracted implementation must satisfy all of the following:
    - Full SHA preferred.
    - This is the source commit whose behavior must be preserved outside oneDNN.
 
-4. `oneDNN_ext path`
+4. `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64 path`
    - Absolute path to the standalone extension library root.
    - This path may already exist or may need to be created.
 
 ## Outputs
 
-1. A standalone implementation under `oneDNN_ext` that preserves the behavior of the target commit.
+1. A standalone implementation under `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` that preserves the behavior of the target commit.
 2. Integration changes required so the standalone implementation can work with oneDNN basic data structures.
 3. The target commit reverted from stock oneDNN.
 4. A validated OpenVINO build and test run showing the feature still works correctly.
@@ -77,8 +77,8 @@ rg --line-number --hidden '<symbol_or_class_name>' "$ONEDNN_PATH"
 Keep a dependency list with three categories:
 
 1. Must reuse directly from oneDNN.
-2. Can be wrapped or adapted in `oneDNN_ext`.
-3. Must be reimplemented in `oneDNN_ext` to avoid pulling large unrelated oneDNN internals.
+2. Can be wrapped or adapted in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`.
+3. Must be reimplemented in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` to avoid pulling large unrelated oneDNN internals.
 
 ### Step 2 — Define the extraction boundary before moving code
 
@@ -88,7 +88,7 @@ A good extraction boundary usually has these properties:
 
 1. The hot-path implementation stays structurally close to the original oneDNN code.
 2. oneDNN-owned core data structures remain owned by oneDNN.
-3. `oneDNN_ext` adds only the minimal adapter layer needed to instantiate and call the extracted logic.
+3. `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` adds only the minimal adapter layer needed to instantiate and call the extracted logic.
 4. Public API differences are limited to packaging and integration details, not semantic behavior.
 
 Explicitly identify:
@@ -96,25 +96,23 @@ Explicitly identify:
 1. Entry points that OpenVINO or higher layers will call.
 2. oneDNN types that must remain in the interface.
 3. oneDNN internals that must not be copied wholesale.
-4. Build-system changes needed so `oneDNN_ext` compiles separately.
+4. Build-system changes needed so `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` compiles separately.
 
 If the original commit contains registration or dispatch wiring mixed with the implementation, separate them into:
 
-1. reusable implementation logic to move into `oneDNN_ext`
-2. thin integration logic that adapts stock oneDNN to `oneDNN_ext`
+1. reusable implementation logic to move into `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`
+2. thin integration logic that adapts stock oneDNN to `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` and can be removed from oneDNN after extraction
 
-### Step 3 — Extract the implementation into `oneDNN_ext`
+### Step 3 — Extract the implementation into `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`
 
-Create or update the standalone directory structure under `oneDNN_ext`.
+Create or update the standalone directory structure under `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`.
 
 Typical layout:
 
 ```text
-<oneDNN_ext_path>/
-  include/
-  src/
-  cmake/
-  tests/
+<openvino/src/plugins/intel_cpu/src/nodes/kernels/x64>/
+  jit_kernel_name.hpp  # JIT code or ISA-specific code if needed
+  jit_kernel_name.cpp
 ```
 
 Recommended extraction rules:
@@ -129,7 +127,7 @@ Allowed implementation techniques:
 
 1. Direct reuse of oneDNN headers and basic data structures.
 2. Wrapper types around oneDNN primitives or descriptors.
-3. Local helper classes in `oneDNN_ext`.
+3. Local helper classes in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`.
 4. C++ templates, macros, JIT helpers, intrinsics, or assembly when required to keep performance.
 
 When moving code, keep the design close to the original commit unless a smaller standalone interface is clearly better.
@@ -143,9 +141,9 @@ API guidance:
 1. Keep names, argument ordering, and semantic meaning close to the original implementation where practical.
 2. Keep oneDNN descriptors, memory descriptors, engines, streams, attributes, and primitive-like concepts visible when they are part of the true contract.
 3. Remove only those integration details that are specific to stock oneDNN registration internals.
-4. Document any API deviation that exists only because the code now lives in `oneDNN_ext`.
+4. Document any API deviation that exists only because the code now lives in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`.
 
-If a helper or adapter is needed, place it in `oneDNN_ext` rather than reintroducing the original implementation back into oneDNN.
+If a helper or adapter is needed, place it in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` rather than reintroducing the original implementation back into oneDNN.
 
 ### Step 5 — Verify correctness of the standalone implementation
 
@@ -200,7 +198,7 @@ git revert "$TARGET_SHA"
 If conflicts occur:
 
 1. resolve them without reintroducing the extracted implementation into stock oneDNN
-2. keep only the minimal stock-oneDNN state required for `oneDNN_ext` to integrate correctly
+2. keep only the minimal stock-oneDNN state required for `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` to integrate correctly
 3. remove all conflict markers
 
 Then continue:
@@ -222,7 +220,7 @@ Then redo the same revert cleanly.
 
 Build OpenVINO only after both of these are true:
 
-1. the target functionality now lives in `oneDNN_ext`
+1. the target functionality now lives in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`
 2. the original oneDNN commit has been reverted
 
 Typical flow:
@@ -235,7 +233,7 @@ cmake -S . -B build -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --parallel "$(nproc)"
 ```
 
-If OpenVINO needs explicit integration flags or paths for `oneDNN_ext`, add them at configure time and keep them documented in the change.
+If OpenVINO needs explicit integration flags or paths for `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`, add them at configure time and keep them documented in the change.
 
 ### Step 9 — Run validation tests in OpenVINO
 
@@ -263,9 +261,9 @@ Save logs when practical so failures can be compared before and after extraction
 
 Before considering the task complete, confirm all of the following:
 
-1. The functional logic from the target commit now exists in `oneDNN_ext`.
+1. The functional logic from the target commit now exists in `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64`.
 2. Stock oneDNN no longer contains that specific implementation change.
-3. `oneDNN_ext` still works with oneDNN basic data structures.
+3. `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` still works with oneDNN basic data structures.
 4. Behavior matches the original commit.
 5. Performance matches the original commit.
 6. OpenVINO builds successfully.
@@ -276,7 +274,7 @@ Before considering the task complete, confirm all of the following:
 The task is complete only when all of the following are true:
 
 1. The target commit has been fully understood, including its dependencies and performance-sensitive paths.
-2. The implementation represented by that commit has been extracted into `oneDNN_ext` as a standalone solution.
+2. The implementation represented by that commit has been extracted into `openvino/src/plugins/intel_cpu/src/nodes/kernels/x64` as a standalone solution.
 3. The standalone implementation preserves function and performance.
 4. The standalone API is similar enough to the original oneDNN-facing API to be practical to use and maintain.
 5. The target commit has been reverted from stock oneDNN.
